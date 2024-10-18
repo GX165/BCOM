@@ -1,0 +1,125 @@
+#load matrix, gene, barcodes
+process_data <- function(matrix_file, genes_file, barcodes_file) {
+  mat <- readMM(matrix_file)
+  gene_info <- read.delim(genes_file, stringsAsFactors = FALSE, sep = "\t", header = FALSE)
+  barcodes <- read.delim(barcodes_file, stringsAsFactors = FALSE, sep = "\t", header = FALSE)
+  
+  rownames(mat) <- gene_info[, 1]
+  colnames(mat) <- barcodes[, 1]
+  mat <- as.matrix(mat)
+  data_sample_1 <- as.matrix(mat)
+  rownames(data_sample_1) <- gene_info[, 2]
+  return(data_sample_1)
+}
+
+#lung, sample1-4
+sample1 <- process_data("E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662224_K5_472\\matrix.mtx",
+                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662224_K5_472\\genes.tsv",
+                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662224_K5_472\\barcodes.tsv")
+sample2 <- process_data("E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662225_K6_473\\matrix.mtx",
+                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662225_K6_473\\genes.tsv",
+                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662225_K6_473\\barcodes.tsv")
+sample3 <- process_data("E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662226_K7_478\\matrix.mtx",
+                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662226_K7_478\\genes.tsv",
+                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662226_K7_478\\barcodes.tsv")
+sample4 <- process_data("E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662227_K8_477\\matrix.mtx",
+                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662227_K8_477\\genes.tsv",
+                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662227_K8_477\\barcodes.tsv")
+lung<-cbind(sample1,sample2,sample3,sample4)
+
+# create seurat object
+assay <- CreateAssayObject(lung[,names(label_factor)],analysis = "RNA")
+lung<- CreateSeuratObject(assay)
+
+# meta.data
+cellsTsne<-tsne_result[ApproxTruth[[1]],]
+celltype<-ApproxTruth[[2]]
+names(celltype)<-cellsTsne$Barcode
+label<-celltype[names(celltype) %in% colnames(lung)]
+label_factor <- factor(label)
+names(label_factor) <- names(label)
+vector1 <- rep(1, 577)
+names(vector1)<-colnames(sample1)
+vector2 <- rep(2, 724)
+names(vector2)<-colnames(sample2)
+vector3 <- rep(3, 684)
+names(vector3)<-colnames(sample3)
+vector4 <- rep(4, 649)
+names(vector4)<-colnames(sample4)
+result_vector <- c(vector1, vector2,vector3, vector4)
+batch_factor <- factor(result_vector)
+names(batch_factor) <- names(result_vector)
+batch_info <- batch_factor[names(label_factor)]
+lung@meta.data$batch <- batch_info
+lung@meta.data$celltype <- label_factor
+
+#seurat 
+lung <- NormalizeData(lung, verbose = FALSE)
+var_features <- lapply(split(row.names(lung@meta.data), lung@meta.data[["batch"]]), function(cells_use) {
+  var_feats <- FindVariableFeatures(lung[, cells_use], selection.method = "vst", nfeatures = 2000)
+  VariableFeatures(var_feats)
+})
+VariableFeatures(lung) <- unique(unlist(var_features))
+lung <- ScaleData(lung, verbose = FALSE)
+lung <- RunPCA(lung, features = VariableFeatures(lung), npcs = 20, verbose = FALSE)
+
+#Harmony
+lung<- RunHarmony(lung, "batch", plot_convergence = TRUE, 
+                  nclust = 50, max_iter = 10, early_stop = TRUE)
+
+#CCA
+lung.list <- SplitObject(lung, split.by = "batch")
+lung.anchors <- FindIntegrationAnchors(object.list = lung.list, dims = 1:30)
+lung.integrated <- IntegrateData(anchorset = lung.anchors, dims = 1:30)
+DefaultAssay(lung.integrated) <- "integrated"
+lung.integrated <- ScaleData(lung.integrated, verbose = FALSE)
+lung.integrated <- RunPCA(lung.integrated, npcs = 30, verbose = FALSE)
+
+#MNN
+lung_mnn<- RunFastMNN(object.list = lung.list)
+
+#input data
+label<-lung@meta.data$celltype
+norm<-lung@assays$RNA@data
+count<-lung@assays$RNA@counts
+harmony<- Embeddings(lung, 'harmony')
+cca<-lung.integrated@reductions[["pca"]]@cell.embeddings
+mnn<-lung@reductions[["mnn"]]@cell.embeddings
+
+#regulon identification
+motifAnnotations_mgi <- motifAnnotations
+scenicOptions <- initializeScenic(org = "mgi", 
+                                  dbDir = "/home/223050029/BAMMC/cisTarget_databases", 
+                                  nCores = 20)
+exprMat<-as.matrix(count)
+genesKept <- geneFiltering(exprMat, scenicOptions)
+exprMat_filtered <- exprMat[genesKept, ]
+runCorrelation(exprMat_filtered, scenicOptions)
+exprMat_filtered_log <- log2(exprMat_filtered+1) 
+runGenie3(exprMat_filtered_log, scenicOptions)
+exprMat_log <- log2(exprMat+1)
+scenicOptions@settings$dbs <- scenicOptions@settings$dbs["10kb"] 
+scenicOptions <- runSCENIC_1_coexNetwork2modules(scenicOptions)
+scenicOptions <- runSCENIC_2_createRegulons(scenicOptions,coexMethod=c("top5perTarget")) 
+scenicOptions <- runSCENIC_3_scoreCells(scenicOptions, exprMat_log ) 
+
+# create cisTopic object
+library(cisTopic)
+cisTopicObject<-createcisTopicObject(
+  atac,
+  project.name = "cisTopicProject",
+  min.cells = 1,
+  min.regions = 1,
+  is.acc = 1,
+  keepCountsMatrix = TRUE
+)
+cisTopicObject <- addCellMetadata(cisTopicObject, metadata)
+cisTopicObject <- runWarpLDAModels(cisTopicObject, topic=c(2, 5, 10:25, 30, 35, 40), seed=987, nCores=1, iterations = 500, addModels=FALSE)
+
+par(mfrow=c(3,3))
+cisTopicObject <- selectModel(cisTopicObject, type='maximum')
+cisTopicObject <- selectModel(cisTopicObject, type='perplexity')
+cisTopicObject <- selectModel(cisTopicObject, type='derivative')
+
+cellassign <- modelMatSelection(cisTopicObject, 'cell', 'Probability')
+save(cellassign,file="cellassign.rda")
