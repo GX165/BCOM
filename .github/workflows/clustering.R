@@ -69,21 +69,19 @@ clean_sets <- function(gSet){
 }
 
 #SNF fusion
-integrating_pathway <- function(mat_gene, mat_path){
-  K = 10; # number of neighbors, usually (10~30)
-  alpha = 0.5; # hyperparameter, usually (0.3~0.8)
-  T = 20; # Number of Iterations, usually (10~20)
-  mat_gene = t(mat_gene)
-  mat_gene = standardNormalization(mat_gene)
-  mat_gene = (dist2(as.matrix(mat_gene),as.matrix(mat_gene)))^(1/2)
-  mat_gene = affinityMatrix(mat_gene, K, alpha)
-  mat_path = t(mat_path)
-  mat_path = standardNormalization(mat_path)
-  mat_path = (dist2(as.matrix(mat_path),as.matrix(mat_path)))^(1/2)
-  mat_path = affinityMatrix(mat_path, K, alpha)
-  W = SNF(list(mat_path, mat_gene), K, T)
+integrating <- function(mat_list) {
+  K = 10  
+  alpha = 0.5  
+  T = 20  
+  processed_matrices <- lapply(mat_list, function(mat) {
+    mat <- t(mat)
+    mat <- standardNormalization(mat)
+    mat <- (dist2(as.matrix(mat), as.matrix(mat)))^(1/2) 
+    affinityMatrix(mat, K, alpha)
+  })
+  W <- SNF(processed_matrices, K, T)
   return(W)
-}
+}                
 
 # Hierarchical clustering
 clustering<- function(mat_gene,k){
@@ -110,67 +108,88 @@ evaluate_clustering <- function(count, norm, harmony, caa, mnn, gSet, label) {
   
   # Pathway
   KEGG <- getGmt("/home/223050029/BAMMC/KEGG_human.gmt")
-  gset <- subsetGeneSets(KEGG, rownames(norm))
-  gset <- jaccard(gset, norm)
+  gset <- subsetGeneSets(KEGG, rownames(count))
+  gset <- jaccard(gset, count)
   gset <- clean_sets(gset)
   mat_path <- pathway_scoring(gset, norm)
-  W <- integrating_pathway(norm, mat_path)
-  colnames(W) <- colnames(count)
-  cluster_p <- clustering(W, k = length(unique(label)))
+  cluster_p <- clustering(mat_path, k = length(unique(label)))
   evaluation_path <- evaluation(cluster_p, label)
   
-  # AUC
+  # Regulon
   mat_auc <- pathway_scoring(gSet, norm)
   cluster_auc <- clustering(mat_auc, k = length(unique(label)))
   evaluation_auc <- evaluation(cluster_auc, label)
+
+	# Atac
+	cluster_atac <- clustering(cellassign, k = length(unique(label)))
+  evaluation_atac <- evaluation(cluster_atac, label)
+
+	# Atac-pathway
+	list1 <- list(cellassign,mat_path)
+  wcp <- integrating(list1)
+  colnames(wcp) <- colnames(cellassign)
+  cluster_cp <- clustering(wcp, k = length(unique(label)))
+  evaluation_cp <- evaluation(cluster_cp, label)
   
-  # Harmony-gene
-  cluster_h <- clustering(t(harmony), k = length(unique(label)))
-  evaluation_h <- evaluation(cluster_h, label)
+  # Atac-regulon
+	list2 <- list(cellassign,mat_auc)
+  wca <- integrating(list2)
+  colnames(wca) <- colnames(cellassign)
+  cluster_ca <- clustering(wca, k = length(unique(label)))
+  evaluation_ca <- evaluation(cluster_ca, label)
+
+	# Atac-pathway-regulon
+	list3 <- list(cellassign,mat_path,mat_auc)
+  whcp <- integrating(list3)
+  colnames(whcp) <- colnames(cellassign)
+  cluster_hcp <- clustering(whcp, k = length(unique(label)))
+  evaluation_hcp <- evaluation(cluster_hcp, label)
+
+	#Harmony
+	cluster_h<-clustering(t(harmony),k=length(unique(label)))
+	evaluation(cluster_h,label)
   
   # Harmony-pathway
-  w <- integrating_pathway(t(harmony), mat_path)
-  colnames(w) <- colnames(t(harmony))
-  cluster_hp <- clustering(w, k = length(unique(label)))
+	list4 <- list(t(harmony),mat_path)
+  whp <- integrating(list4)
+  colnames(whp) <- colnames(t(harmony))
+  cluster_hp <- clustering(whp, k = length(unique(label)))
   evaluation_hp <- evaluation(cluster_hp, label)
   
-  # Harmony-AUC
-  w1 <- integrating_pathway(t(harmony), mat_auc)
-  colnames(w1) <- colnames(t(harmony))
-  cluster_ha <- clustering(w1, k = length(unique(label)))
+  # Harmony-regulon
+	list5 <- list(t(harmony), mat_auc)
+  wha <- integrating(list5)
+  colnames(wha) <- colnames(t(harmony))
+  cluster_ha <- clustering(wha, k = length(unique(label)))
   evaluation_ha <- evaluation(cluster_ha, label)
 
-  #CCA
-  cluster_c<-clustering(t(cca),k=length(unique(label)))
-  evaluation_c<-evaluation(cluster_c,label)
+  # Harmony-atac
+	list6 <- list(t(harmony), cellassign)
+  whc<-integrating(list6)
+  colnames(whc) <- colnames(t(harmony))
+  cluster_hc<-clustering(whc,k=length(unique(label)))
+  evaluation_hc<-evaluation(cluster_hc,label)
 
-  #CCA-path
-  w2<-integrating_pathway(t(cca),mat_path)
-  colnames(w2) <- colnames(t(cca))
-  cluster_cp<-clustering(w2,k=length(unique(label)))
-  evaluation_cp<-evaluation(cluster_cp,label)
+  # Harmony-atac-pathway
+  list7 <- list(t(harmony), cellassign, mat_path)
+  whcp<-integrating(list7)
+  colnames(whcp) <- colnames(t(harmony))
+  cluster_hcp<-clustering(whcp,k=length(unique(label)))
+  evaluation_hcp<-evaluation(cluster_hcp,label)
+	
+  # Harmony-atac-regulon
+  list8 <- list(t(harmony), cellassign, mat_auc)
+  whca<-integrating(list8)
+  colnames(whca) <- colnames(t(harmony))
+  cluster_hca<-clustering(whca,k=length(unique(label)))
+  evaluation_hca<-evaluation(cluster_hca,label)
 
-  #CCA_AUC
-  w3<-integrating_pathway(t(cca),mat_auc)
-  colnames(w3) <- colnames(t(cca))
-  cluster_ca<-clustering(w3,k=length(unique(label)))
-  evaluation_ca<-evaluation(cluster_ca,label)
-
-  #MNN
-  cluster_m<-clustering(t(mnn),k=length(unique(label)))
-  evaluation_m<-evaluation(cluster_m,label)
-
-  #MNN-path
-  w4<-integrating_pathway(t(mnn),mat_path)
-  colnames(w4) <- colnames(t(mnn))
-  cluster_mp<-clustering(w4,k=length(unique(label)))
-  evaluation_mp<-evaluation(cluster_mp,label)
-
-  #MNN_AUC
-  w5<-integrating_pathway(t(mnn),mat_auc)
-  colnames(w5) <- colnames(t(mnn))
-  cluster_ma<-clustering(w5,k=length(unique(label)))
-  evaluation_ma<-evaluation(cluster_ma,label)
+  # Harmony-atac-pathway-regulon
+  list9 <- list(t(harmony), cellassign, mat_path, mat_auc)
+  whcpa<-integrating(list9)
+  colnames(whcpa) <- colnames(t(harmony))
+  cluster_hcpa<-clustering(whcpa,k=length(unique(label)))
+  evaluation_hcpa<-evaluation(cluster_hcpa,label)
   
   # BAMMSC-gene 
   result1 <- DIMMSC(as.matrix(count), K = length(unique(label)))
@@ -196,128 +215,22 @@ evaluate_clustering <- function(count, norm, harmony, caa, mnn, gSet, label) {
     gene = evaluation_g,
     path = evaluation_path,
     auc = evaluation_auc,
+		atac = evaluation_atac,
+		atac_path = evaluation_cp,
+		atac_regulon = evaluation_ca,
+		atac_path_regulon = evaluation_cpa,
     harmony = evaluation_h,
     harmony_path = evaluation_hp,
     harmony_auc = evaluation_ha,
-    caa = evaluation_c,
-    caa_path = evaluation_cp,
-    caa_auc = evaluation_ca,
-    mnn = evaluation_m,
-    mnn_path = evaluation_mp,
-    mnn_auc = evaluation_ma,
+		harmony_atac = evaluation_hc,
+    harmony_atac_auc = evaluation_hca,
+		harmony_atac_pathway = evaluation_hcp,
+    harmony_atac_auc_pathway = evaluation_hcpa,
     bammsc_gene = evaluation_bg,
     bammsc_path = evaluation_bp,
     bammsc_auc = evaluation_ba
   ))
 }
 
-results <- evaluate_clustering(count, norm, harmony, caa, mnn, gSet, label)
-
-
-#data preparation
-
-#load matrix, gene, barcodes
-process_data <- function(matrix_file, genes_file, barcodes_file) {
-  mat <- readMM(matrix_file)
-  gene_info <- read.delim(genes_file, stringsAsFactors = FALSE, sep = "\t", header = FALSE)
-  barcodes <- read.delim(barcodes_file, stringsAsFactors = FALSE, sep = "\t", header = FALSE)
-  
-  rownames(mat) <- gene_info[, 1]
-  colnames(mat) <- barcodes[, 1]
-  mat <- as.matrix(mat)
-  data_sample_1 <- as.matrix(mat)
-  rownames(data_sample_1) <- gene_info[, 2]
-  return(data_sample_1)
-}
-
-#lung, sample1-4
-sample1 <- process_data("E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662224_K5_472\\matrix.mtx",
-                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662224_K5_472\\genes.tsv",
-                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662224_K5_472\\barcodes.tsv")
-sample2 <- process_data("E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662225_K6_473\\matrix.mtx",
-                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662225_K6_473\\genes.tsv",
-                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662225_K6_473\\barcodes.tsv")
-sample3 <- process_data("E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662226_K7_478\\matrix.mtx",
-                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662226_K7_478\\genes.tsv",
-                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662226_K7_478\\barcodes.tsv")
-sample4 <- process_data("E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662227_K8_477\\matrix.mtx",
-                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662227_K8_477\\genes.tsv",
-                        "E:\\bioinformatics\\MBI6013\\reference_0117\\GSE128066_RAW\\GSM3662227_K8_477\\barcodes.tsv")
-lung<-cbind(sample1,sample2,sample3,sample4)
-
-# create seurat object
-assay <- CreateAssayObject(lung[,names(label_factor)],analysis = "RNA")
-lung<- CreateSeuratObject(assay)
-
-#meta.data
-cellsTsne<-tsne_result[ApproxTruth[[1]],]
-celltype<-ApproxTruth[[2]]
-names(celltype)<-cellsTsne$Barcode
-label<-celltype[names(celltype) %in% colnames(lung)]
-label_factor <- factor(label)
-names(label_factor) <- names(label)
-vector1 <- rep(1, 577)
-names(vector1)<-colnames(sample1)
-vector2 <- rep(2, 724)
-names(vector2)<-colnames(sample2)
-vector3 <- rep(3, 684)
-names(vector3)<-colnames(sample3)
-vector4 <- rep(4, 649)
-names(vector4)<-colnames(sample4)
-result_vector <- c(vector1, vector2,vector3, vector4)
-batch_factor <- factor(result_vector)
-names(batch_factor) <- names(result_vector)
-batch_info <- batch_factor[names(label_factor)]
-lung@meta.data$batch <- batch_info
-lung@meta.data$celltype <- label_factor
-
-#seurat 
-lung <- NormalizeData(lung, verbose = FALSE)
-var_features <- lapply(split(row.names(lung@meta.data), lung@meta.data[["batch"]]), function(cells_use) {
-  var_feats <- FindVariableFeatures(lung[, cells_use], selection.method = "vst", nfeatures = 2000)
-  VariableFeatures(var_feats)
-})
-VariableFeatures(lung) <- unique(unlist(var_features))
-lung <- ScaleData(lung, verbose = FALSE)
-lung <- RunPCA(lung, features = VariableFeatures(lung), npcs = 20, verbose = FALSE)
-
-#Harmony
-lung<- RunHarmony(lung, "batch", plot_convergence = TRUE, 
-                  nclust = 50, max_iter = 10, early_stop = TRUE)
-
-#CCA
-lung.list <- SplitObject(lung, split.by = "batch")
-lung.anchors <- FindIntegrationAnchors(object.list = lung.list, dims = 1:30)
-lung.integrated <- IntegrateData(anchorset = lung.anchors, dims = 1:30)
-DefaultAssay(lung.integrated) <- "integrated"
-lung.integrated <- ScaleData(lung.integrated, verbose = FALSE)
-lung.integrated <- RunPCA(lung.integrated, npcs = 30, verbose = FALSE)
-
-#MNN
-lung_mnn<- RunFastMNN(object.list = lung.list)
-
-#input data
-label<-lung@meta.data$celltype
-norm<-lung@assays$RNA@data
-count<-lung@assays$RNA@counts
-harmony<- Embeddings(lung, 'harmony')
-cca<-lung.integrated@reductions[["pca"]]@cell.embeddings
-mnn<-lung@reductions[["mnn"]]@cell.embeddings
-
-#regulon identification
-motifAnnotations_mgi <- motifAnnotations
-scenicOptions <- initializeScenic(org = "mgi", 
-                                  dbDir = "/home/223050029/BAMMC/cisTarget_databases", 
-                                  nCores = 20)
-exprMat<-as.matrix(count)
-genesKept <- geneFiltering(exprMat, scenicOptions)
-exprMat_filtered <- exprMat[genesKept, ]
-runCorrelation(exprMat_filtered, scenicOptions)
-exprMat_filtered_log <- log2(exprMat_filtered+1) 
-runGenie3(exprMat_filtered_log, scenicOptions)
-exprMat_log <- log2(exprMat+1)
-scenicOptions@settings$dbs <- scenicOptions@settings$dbs["10kb"] 
-scenicOptions <- runSCENIC_1_coexNetwork2modules(scenicOptions)
-scenicOptions <- runSCENIC_2_createRegulons(scenicOptions,coexMethod=c("top5perTarget")) 
-scenicOptions <- runSCENIC_3_scoreCells(scenicOptions, exprMat_log ) 
+results <- evaluate_clustering(count, harmony, cellassign, gSet, label)
 
