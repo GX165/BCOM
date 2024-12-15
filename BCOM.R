@@ -78,7 +78,7 @@ getTopGenes <- function(cisTopicObject, pred.matrix) {
 filtered_count<-count[rownames(count) %in% top_gene,]
 # Perform BAMMSC clustering
 result<-BAMMSC(as.matrix(filtered_count),K=length(unique(label)))
-clust_bcom<-unlist(result$mem)
-names(clust_bcom)<-colnames(filtered_count)
+cluster_bcom<-unlist(result$mem)
+names(cluster_bcom)<-colnames(filtered_count)
 
 
